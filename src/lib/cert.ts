@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import forge from "node-forge";
 import { Agent, setGlobalDispatcher } from "undici";
-
+let _agent: Agent | null = null;
+export function getMtlsAgent(): Agent {
+  if (_agent) return _agent;
+  const { keyPem, certPem } = loadP12Pem();
+  _agent = new Agent({ connect: { tls: { key: keyPem, cert: certPem } } } as any);
+  return _agent;
+}
 function loadP12Buffer(): Buffer {
   const b64 = process.env.SII_CERT_P12_B64?.trim();
   if (b64) return Buffer.from(b64, "base64");

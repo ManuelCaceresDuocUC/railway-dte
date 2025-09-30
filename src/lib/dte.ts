@@ -6,6 +6,10 @@ import { create } from "xmlbuilder2";
 import { DOMParser } from "@xmldom/xmldom";
 import { SignedXml } from "xml-crypto";
 import { ensureMtlsDispatcher, loadP12Pem } from "./cert.js";
+import { getMtlsAgent } from "./cert.js";
+import { fetch as ufetch } from "undici";
+
+
 ensureMtlsDispatcher();
 
 /* ==================== Tipos ==================== */
@@ -35,13 +39,22 @@ function assertHasId(xml: string, id: string) {
 /* ==================== HTTP SOAP (mTLS) ==================== */
 function hasClientCert() { return !!process.env.SII_CERT_P12_B64 || !!process.env.SII_CERT_P12_PATH; }
 
-async function postSOAP(p:string, body:string, extra?:Record<string,string>){
-  const url=`${BASE}${p}`;
-  const res=await fetch(url,{method:"POST",headers:{
-    "Content-Type":"text/xml; charset=ISO-8859-1",Accept:"text/xml,application/xml,text/plain",SOAPAction:"",...(extra??{}),
-  },body:Buffer.from(body,"latin1")});
-  const txt=await res.text();
-  console.log("[SII SOAP]", p, "status", res.status, "head:", txt.slice(0,180));
+async function postSOAP(p: string, body: string, extra?: Record<string,string>) {
+  const url = `${BASE}${p}`;
+  const res = await ufetch(url, {                 // <-- undici.fetch
+    method: "POST",
+    headers: {
+      "Content-Type": "text/xml; charset=ISO-8859-1",
+      Accept: "text/xml,application/xml,text/plain",
+      SOAPAction: "",
+      ...(extra ?? {}),
+    },
+    body: Buffer.from(body, "latin1"),
+    dispatcher: getMtlsAgent(),                   // <-- mTLS por request
+    redirect: "manual",
+  });
+  const txt = await res.text();
+  console.log("[SII SOAP]", p, "status", res.status, "ctype:", res.headers.get("content-type"));
   if (/^\s*<html/i.test(txt)) throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente o endpoint errado.");
   if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0,400)}`);
   return txt;
