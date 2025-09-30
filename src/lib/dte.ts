@@ -109,20 +109,23 @@ export function buildDTE({
   }
   if (exento > 0) root.ele("MntExe").txt(String(exento)).up();
   root.ele("MntTotal").txt(String(total)).up().up(); // </Totales>
+  // tras cerrar <Totales>
+const documento = root.up().up(); // Totales -> Encabezado -> Documento
 
-  items.forEach((it, idx) => {
-    const det = root.up().ele("Detalle");
-    det.ele("NroLinDet").txt(String(idx + 1)).up();
-    det.ele("NmbItem").txt(it.nombre).up();
-    det.ele("QtyItem").txt(String(it.qty)).up();
-    if (it.exento) det.ele("IndExe").txt("1").up();
-    det.ele("PrcItem").txt(String(it.precioNeto)).up();
-    det.up();
-  });
+items.forEach((it, idx) => {
+  const det = documento.ele("Detalle");
+  det.ele("NroLinDet").txt(String(idx + 1)).up();
+  det.ele("NmbItem").txt(it.nombre).up();
+  det.ele("QtyItem").txt(String(it.qty)).up();
+  if (tipo === 41 || it.exento) det.ele("IndExe").txt("1").up(); // ver punto 2
+  det.ele("PrcItem").txt(String(it.precioNeto)).up();
+  det.up();
+});
 
-  const xml = root.up().up().end({ prettyPrint: true });
-  return { xml, neto: netoAfecto, iva, total };
+const xml = documento.doc().end({ prettyPrint: true });
+return { xml, neto: netoAfecto, iva, total };
 }
+  
 
 /* ==================== TED y firma Documento ==================== */
 type DteHead = { RE: string; TD: number; F: number; FE: string; RR: string; RSR: string; MNT: number; IT1: string; };
