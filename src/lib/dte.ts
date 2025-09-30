@@ -18,8 +18,9 @@ type XEl = { localName: string; textContent: string | null };
 
 /* ==================== Utilidades ==================== */
 const SII_ENV = (process.env.SII_ENV || "cert").toLowerCase();
-const BASE = SII_ENV === "prod" ? "https://maullin.sii.cl" : "https://palena.sii.cl";
 
+const BASE = SII_ENV === "prod" ? "https://maullin.sii.cl" : "https://palena.sii.cl";
+console.log("SII_ENV", SII_ENV, "BASE", BASE);
 const soapEnv = (inner: string) =>
   `<?xml version="1.0" encoding="ISO-8859-1"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body>${inner}</soapenv:Body></soapenv:Envelope>`;
 
@@ -256,7 +257,9 @@ async function getTokenFromSeed(signedXml: string): Promise<string> {
   const ret = nodes.find(n => n.localName === "getTokenReturn");
   if (!ret?.textContent) throw new Error(`No <getTokenReturn>. Head: ${resp.slice(0,200)}`);
   const decoded = unescapeXml(ret.textContent);
-  const m = decoded.match(/<TOKEN>([^<]+)<\/TOKEN>/i);
+console.log("GETTOKEN_RAW", decoded.slice(0, 600));
+const m = decoded.match(/<TOKEN>([^<]+)<\/TOKEN>/i);
+console.log("MATCH_LEN", m?.[1]?.length);
   if (!m) throw new Error(`No <TOKEN>. Head: ${decoded.slice(0,200)}`);
   return m[1].trim();
 }
@@ -265,6 +268,7 @@ export async function getToken(): Promise<string> {
   if (!hasClientCert() || !process.env.SII_CERT_PASSWORD) return "TOKEN_FAKE_CERT";
   const seed = await getSeed();
   const signed = signXmlEnveloped(buildSeedXML(seed), "GT");
+  console.log("GETTOKEN_SIGNED_HEAD", signed.slice(0, 400));
   return getTokenFromSeed(signed);
 }
 
