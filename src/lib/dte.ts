@@ -47,9 +47,12 @@ async function postSOAP(p: string, body: string, extra?: Record<string,string>) 
     body: Buffer.from(body, "latin1"),
   });
   const txt = await res.text();
-  if (/^\s*<html/i.test(txt)) throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente.");
-  if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0, 400)}`);
-  return txt;
+// Log breve solo para /EnvioDTE
+if (p.includes("/EnvioDTE.jws")) {
+  console.log("[EnvioDTE SOAP HEAD]:", txt.slice(0, 600));
+}
+if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0, 400)}`);
+return txt;
 }
 
 /* ==================== CAF ==================== */
