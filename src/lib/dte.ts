@@ -25,11 +25,8 @@ const soapEnv = (inner: string) =>
 
 function stripXmlDecl(s: string) { return s.replace(/^\s*<\?xml[^?]*\?>\s*/i, ""); }
 function unescapeXml(s: string) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"); }
-function getTipoFromDte(xml: string): number {
-  const m = xml.match(/<TipoDTE>(\d+)<\/TipoDTE>/i);
-  if (!m) throw new Error("TipoDTE no encontrado");
-  return Number(m[1]);
-}
+function getTipoFromDte(xml: string){const m=xml.match(/<TipoDTE>(\d+)<\/TipoDTE>/i); if(!m)throw new Error("TipoDTE no encontrado"); return Number(m[1]);}
+
 function assertHasId(xml: string, id: string) {
   if (!new RegExp(`\\b(Id|ID)="${id}"`).test(xml)) throw new Error(`Nodo a firmar sin Id="${id}"`);
 }
@@ -37,26 +34,16 @@ function assertHasId(xml: string, id: string) {
 /* ==================== HTTP SOAP (mTLS) ==================== */
 function hasClientCert() { return !!process.env.SII_CERT_P12_B64 || !!process.env.SII_CERT_P12_PATH; }
 
-async function postSOAP(p: string, body: string, extra?: Record<string,string>) {
-  // antes: if (hasClientCert()) ensureMtlsDispatcher();
-  // ahora: ya está inicializado en módulo
-  const res = await fetch(`${BASE}${p}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "text/xml; charset=ISO-8859-1",
-      Accept: "text/xml,application/xml,text/plain",
-      SOAPAction: "",
-      ...(extra ?? {}),
-    },
-    body: Buffer.from(body, "latin1"),
-  });
-  const txt = await res.text();
-// Log breve solo para /EnvioDTE
-if (p.includes("/EnvioDTE.jws")) {
-  console.log("[EnvioDTE SOAP HEAD]:", txt.slice(0, 600));
-}
-if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0, 400)}`);
-return txt;
+async function postSOAP(p:string, body:string, extra?:Record<string,string>){
+  const url=`${BASE}${p}`;
+  const res=await fetch(url,{method:"POST",headers:{
+    "Content-Type":"text/xml; charset=ISO-8859-1",Accept:"text/xml,application/xml,text/plain",SOAPAction:"",...(extra??{}),
+  },body:Buffer.from(body,"latin1")});
+  const txt=await res.text();
+  console.log("[SII SOAP]", p, "status", res.status, "head:", txt.slice(0,180));
+  if (/^\s*<html/i.test(txt)) throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente o endpoint errado.");
+  if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0,400)}`);
+  return txt;
 }
 
 /* ==================== CAF ==================== */
@@ -283,11 +270,10 @@ export async function getToken(): Promise<string> {
 }
 
 /* ==================== Envío DTE ==================== */
-function buildSobreEnvio(dteXml: string): string {
-  const now = new Date().toISOString().slice(0, 19);
-  const tipo = getTipoFromDte(dteXml);
-  const root = (tipo === 39 || tipo === 41) ? "EnvioBOLETA" : "EnvioDTE";
-
+function buildSobreEnvio(dteXml:string){
+  const now=new Date().toISOString().slice(0,19);
+  const tipo=getTipoFromDte(dteXml);
+  const root=(tipo===39||tipo===41)?"EnvioBOLETA":"EnvioDTE";
   return `<?xml version="1.0" encoding="ISO-8859-1"?>
 <${root} xmlns="http://www.sii.cl/SiiDte" version="1.0" ID="ENV" Id="ENV">
   <SetDTE ID="SetDoc" Id="SetDoc">
@@ -295,8 +281,7 @@ function buildSobreEnvio(dteXml: string): string {
       <RutEmisor>${process.env.BILLING_RUT}</RutEmisor>
       <RutEnvia>${process.env.SII_RUT_ENVIA}</RutEnvia>
       <RutReceptor>60803000-K</RutReceptor>
-      <FchResol>2014-01-01</FchResol>
-      <NroResol>0</NroResol>
+      <FchResol>2014-01-01</FchResol><NroResol>0</NroResol>
       <TmstFirmaEnv>${now}</TmstFirmaEnv>
       <SubTotDTE><TpoDTE>${tipo}</TpoDTE><NroDTE>1</NroDTE></SubTotDTE>
     </Caratula>
@@ -322,18 +307,12 @@ function extractTrackIdFromUpload(respSoap: string): string {
   return m[1];
 }
 
-export async function sendEnvioDTE(xmlDte: string, token: string) {
-  const firmado = signSobre(buildSobreEnvio(xmlDte));
-  const tipo = getTipoFromDte(xmlDte);
-  const path = (tipo === 39 || tipo === 41)
-    ? "/DTEWS/EnvioBOLETA.jws"
-    : "/DTEWS/EnvioDTE.jws";
-
-  const env = soapEnv(
-    `<upload><fileName>SetDTE.xml</fileName><contentFile><![CDATA[${firmado}]]></contentFile></upload>`
-  );
-
-  const txt = await postSOAP(path, env, { Cookie: `TOKEN=${token}` });
-  const trackid = extractTrackIdFromUpload(txt);
-  return { trackid };
+export async function sendEnvioDTE(xmlDte:string, token:string){
+  const firmado=signSobre(buildSobreEnvio(xmlDte));
+  const tipo=getTipoFromDte(xmlDte);
+  const path=(tipo===39||tipo===41)?"/DTEWS/EnvioBOLETA.jws":"/DTEWS/EnvioDTE.jws";
+  const env=soapEnv(`<upload><fileName>SetDTE.xml</fileName><contentFile><![CDATA[${firmado}]]></contentFile></upload>`);
+  const txt=await postSOAP(path, env, {Cookie:`TOKEN=${token}`});
+  const trackid=extractTrackIdFromUpload(txt);
+  return {trackid};
 }
