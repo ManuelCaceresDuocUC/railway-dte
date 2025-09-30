@@ -6,6 +6,7 @@ import { create } from "xmlbuilder2";
 import { DOMParser } from "@xmldom/xmldom";
 import { SignedXml } from "xml-crypto";
 import { ensureMtlsDispatcher, loadP12Pem } from "./cert.js";
+ensureMtlsDispatcher();
 
 /* ==================== Tipos ==================== */
 type Caf = {
@@ -32,19 +33,16 @@ function assertHasId(xml: string, id: string) {
 /* ==================== HTTP SOAP (mTLS) ==================== */
 function hasClientCert() { return !!process.env.SII_CERT_P12_B64 || !!process.env.SII_CERT_P12_PATH; }
 
-async function postSOAP(
-  p: string,
-  body: string,
-  extraHeaders?: Readonly<Record<string, string>>
-): Promise<string> {
-  if (hasClientCert()) ensureMtlsDispatcher();
+async function postSOAP(p: string, body: string, extra?: Record<string,string>) {
+  // antes: if (hasClientCert()) ensureMtlsDispatcher();
+  // ahora: ya está inicializado en módulo
   const res = await fetch(`${BASE}${p}`, {
     method: "POST",
     headers: {
       "Content-Type": "text/xml; charset=ISO-8859-1",
       Accept: "text/xml,application/xml,text/plain",
       SOAPAction: "",
-      ...(extraHeaders ?? {}),
+      ...(extra ?? {}),
     },
     body: Buffer.from(body, "latin1"),
   });
