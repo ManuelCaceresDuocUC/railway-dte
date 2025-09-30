@@ -12,15 +12,11 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-app.get("/token", async (_req: Request, res: Response) => {
-  try {
-    const token = await getToken();
-    res.json({ ok: true, tokenHead: token.slice(0, 24) });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ ok: false, error: msg });
-  }
+app.get("/token", async (_req, res) => {
+  const token = await getToken();
+  res.json({ ok: true, token });
 });
+
 
 app.post("/send", async (req: Request, res: Response) => {
   try {

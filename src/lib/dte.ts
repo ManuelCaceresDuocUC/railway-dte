@@ -151,12 +151,8 @@ function signDDwithRSASK(ddXml: string, rsaskPem: string): string {
   signer.update(Buffer.from(ddXml, "latin1"));
   return signer.sign(rsaskPem).toString("base64");
 }
-
-function injectTEDandTmst(dteXml: string, tedXml: string, ts: string): string {
-  return dteXml.replace(
-    /<\/Encabezado>\s*<\/Documento>/,
-    `</Encabezado>\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`
-  );
+function injectTEDandTmst(dteXml: string, tedXml: string, ts: string) {
+  return dteXml.replace(/<\/Documento>\s*$/i, `\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`);
 }
 
 function addRefById(sig: SignedXml, id: string) {
