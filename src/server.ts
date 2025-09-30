@@ -12,10 +12,8 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-app.get("/token", async (_req, res) => {
-  const token = await getToken();
-  res.json({ ok: true, token });
-});
+app.get("/token", async (_req,res)=>{ const token=await getToken(); res.json({ok:true, token, len: token.length}); });
+
 
 
 app.post("/send", async (req: Request, res: Response) => {
