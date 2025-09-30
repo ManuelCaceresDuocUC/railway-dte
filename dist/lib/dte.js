@@ -6,34 +6,30 @@ import { create } from "xmlbuilder2";
 import { DOMParser } from "@xmldom/xmldom";
 import { SignedXml } from "xml-crypto";
 import { ensureMtlsDispatcher, loadP12Pem } from "./cert.js";
+ensureMtlsDispatcher();
 /* ==================== Utilidades ==================== */
 const SII_ENV = (process.env.SII_ENV || "cert").toLowerCase();
 const BASE = SII_ENV === "prod" ? "https://maullin.sii.cl" : "https://palena.sii.cl";
 const soapEnv = (inner) => `<?xml version="1.0" encoding="ISO-8859-1"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body>${inner}</soapenv:Body></soapenv:Envelope>`;
 function stripXmlDecl(s) { return s.replace(/^\s*<\?xml[^?]*\?>\s*/i, ""); }
 function unescapeXml(s) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"); }
+function getTipoFromDte(xml) { const m = xml.match(/<TipoDTE>(\d+)<\/TipoDTE>/i); if (!m)
+    throw new Error("TipoDTE no encontrado"); return Number(m[1]); }
 function assertHasId(xml, id) {
     if (!new RegExp(`\\b(Id|ID)="${id}"`).test(xml))
         throw new Error(`Nodo a firmar sin Id="${id}"`);
 }
 /* ==================== HTTP SOAP (mTLS) ==================== */
 function hasClientCert() { return !!process.env.SII_CERT_P12_B64 || !!process.env.SII_CERT_P12_PATH; }
-async function postSOAP(p, body, extraHeaders) {
-    if (hasClientCert())
-        ensureMtlsDispatcher();
-    const res = await fetch(`${BASE}${p}`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "text/xml; charset=ISO-8859-1",
-            Accept: "text/xml,application/xml,text/plain",
-            SOAPAction: "",
-            ...(extraHeaders ?? {}),
-        },
-        body: Buffer.from(body, "latin1"),
-    });
+async function postSOAP(p, body, extra) {
+    const url = `${BASE}${p}`;
+    const res = await fetch(url, { method: "POST", headers: {
+            "Content-Type": "text/xml; charset=ISO-8859-1", Accept: "text/xml,application/xml,text/plain", SOAPAction: "", ...(extra ?? {}),
+        }, body: Buffer.from(body, "latin1") });
     const txt = await res.text();
+    console.log("[SII SOAP]", p, "status", res.status, "head:", txt.slice(0, 180));
     if (/^\s*<html/i.test(txt))
-        throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente.");
+        throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente o endpoint errado.");
     if (!res.ok)
         throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0, 400)}`);
     return txt;
@@ -92,17 +88,19 @@ export function buildDTE({ tipo, folio, emisor, receptor, items, fecha, }) {
     if (exento > 0)
         root.ele("MntExe").txt(String(exento)).up();
     root.ele("MntTotal").txt(String(total)).up().up(); // </Totales>
+    // tras cerrar <Totales>
+    const documento = root.up().up(); // Totales -> Encabezado -> Documento
     items.forEach((it, idx) => {
-        const det = root.up().ele("Detalle");
+        const det = documento.ele("Detalle");
         det.ele("NroLinDet").txt(String(idx + 1)).up();
         det.ele("NmbItem").txt(it.nombre).up();
         det.ele("QtyItem").txt(String(it.qty)).up();
-        if (it.exento)
-            det.ele("IndExe").txt("1").up();
+        if (tipo === 41 || it.exento)
+            det.ele("IndExe").txt("1").up(); // ver punto 2
         det.ele("PrcItem").txt(String(it.precioNeto)).up();
         det.up();
     });
-    const xml = root.up().up().end({ prettyPrint: true });
+    const xml = documento.doc().end({ prettyPrint: true });
     return { xml, neto: netoAfecto, iva, total };
 }
 function buildDDXML(cafXml, head, ts) {
@@ -126,7 +124,7 @@ function signDDwithRSASK(ddXml, rsaskPem) {
     return signer.sign(rsaskPem).toString("base64");
 }
 function injectTEDandTmst(dteXml, tedXml, ts) {
-    return dteXml.replace(/<\/Encabezado>\s*<\/Documento>/, `</Encabezado>\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`);
+    return dteXml.replace(/<\/Documento>\s*$/i, `\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`);
 }
 function addRefById(sig, id) {
     const xpath = `//*[@Id='${id}' or @ID='${id}']`;
@@ -238,22 +236,22 @@ export async function getToken() {
 /* ==================== Envío DTE ==================== */
 function buildSobreEnvio(dteXml) {
     const now = new Date().toISOString().slice(0, 19);
-    const tpo = Number(dteXml.match(/<TipoDTE>(\d+)<\/TipoDTE>/)?.[1] ?? 39);
+    const tipo = getTipoFromDte(dteXml);
+    const root = (tipo === 39 || tipo === 41) ? "EnvioBOLETA" : "EnvioDTE";
     return `<?xml version="1.0" encoding="ISO-8859-1"?>
-<EnvioDTE xmlns="http://www.sii.cl/SiiDte" version="1.0" ID="ENV" Id="ENV">
+<${root} xmlns="http://www.sii.cl/SiiDte" version="1.0" ID="ENV" Id="ENV">
   <SetDTE ID="SetDoc" Id="SetDoc">
     <Caratula version="1.0">
       <RutEmisor>${process.env.BILLING_RUT}</RutEmisor>
       <RutEnvia>${process.env.SII_RUT_ENVIA}</RutEnvia>
       <RutReceptor>60803000-K</RutReceptor>
-      <FchResol>2014-01-01</FchResol>
-      <NroResol>0</NroResol>
+      <FchResol>2014-01-01</FchResol><NroResol>0</NroResol>
       <TmstFirmaEnv>${now}</TmstFirmaEnv>
-      <SubTotDTE><TpoDTE>${tpo}</TpoDTE><NroDTE>1</NroDTE></SubTotDTE>
+      <SubTotDTE><TpoDTE>${tipo}</TpoDTE><NroDTE>1</NroDTE></SubTotDTE>
     </Caratula>
     ${dteXml}
   </SetDTE>
-</EnvioDTE>`;
+</${root}>`;
 }
 function signSobre(xmlSobre) { return signXmlEnveloped(xmlSobre, "ENV"); }
 function extractTrackIdFromUpload(respSoap) {
@@ -273,8 +271,10 @@ function extractTrackIdFromUpload(respSoap) {
 }
 export async function sendEnvioDTE(xmlDte, token) {
     const firmado = signSobre(buildSobreEnvio(xmlDte));
+    const tipo = getTipoFromDte(xmlDte);
+    const path = (tipo === 39 || tipo === 41) ? "/DTEWS/EnvioBOLETA.jws" : "/DTEWS/EnvioDTE.jws";
     const env = soapEnv(`<upload><fileName>SetDTE.xml</fileName><contentFile><![CDATA[${firmado}]]></contentFile></upload>`);
-    const txt = await postSOAP(`/DTEWS/EnvioDTE.jws`, env, { Cookie: `TOKEN=${token}` });
+    const txt = await postSOAP(path, env, { Cookie: `TOKEN=${token}` });
     const trackid = extractTrackIdFromUpload(txt);
     return { trackid };
 }

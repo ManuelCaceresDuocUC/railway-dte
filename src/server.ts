@@ -12,9 +12,11 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-app.get("/token", async (_req,res)=>{ const token=await getToken(); res.json({ok:true, token, len: token.length}); });
-
-
+app.get("/token", async (_req, res) => {
+  const token = await getToken();
+  console.log("TOKEN_LEN", token.length, "HEAD", token.slice(0,25), "TAIL", token.slice(-25));
+  res.json({ ok: true, token, len: token.length });
+});
 
 app.post("/send", async (req: Request, res: Response) => {
   try {
