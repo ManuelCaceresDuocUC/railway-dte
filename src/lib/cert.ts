@@ -1,14 +1,10 @@
+// src/lib/cert.ts
 import fs from "node:fs";
 import path from "node:path";
 import forge from "node-forge";
 import { Agent, setGlobalDispatcher } from "undici";
-let _agent: Agent | null = null;
-export function getMtlsAgent(): Agent {
-  if (_agent) return _agent;
-  const { keyPem, certPem } = loadP12Pem();
-  _agent = new Agent({ connect: { tls: { key: keyPem, cert: certPem } } } as any);
-  return _agent;
-}
+
+/** ------- P12 helpers (para firma XML) ------- */
 function loadP12Buffer(): Buffer {
   const b64 = process.env.SII_CERT_P12_B64?.trim();
   if (b64) return Buffer.from(b64, "base64");
@@ -38,12 +34,26 @@ export function loadP12Pem(): { keyPem: string; certPem: string } {
   return { keyPem, certPem };
 }
 
+/** ------- Agent mTLS (para HTTP SOAP) ------- */
+let _agent: Agent | null = null;
+
+export function getMtlsAgent(): Agent {
+  if (_agent) return _agent;
+  _agent = new Agent({
+    connect: {
+      tls: {
+        pfx: loadP12Buffer(),
+        passphrase: process.env.SII_CERT_PASSWORD ?? "",
+        servername: (process.env.SII_ENV?.toLowerCase() === "prod" ? "maullin.sii.cl" : "palena.sii.cl"),
+      },
+    },
+  } as any);
+  return _agent;
+}
+
 let mtlsSet = false;
 export function ensureMtlsDispatcher(): void {
   if (mtlsSet) return;
-  const { keyPem, certPem } = loadP12Pem();
-  const opts = { connect: { tls: { key: keyPem, cert: certPem } } } as unknown as ConstructorParameters<typeof Agent>[0];
-  const agent = new Agent(opts);
-  setGlobalDispatcher(agent);
+  setGlobalDispatcher(getMtlsAgent());
   mtlsSet = true;
 }

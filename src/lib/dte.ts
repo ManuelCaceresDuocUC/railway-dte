@@ -5,10 +5,8 @@ import crypto from "crypto";
 import { create } from "xmlbuilder2";
 import { DOMParser } from "@xmldom/xmldom";
 import { SignedXml } from "xml-crypto";
-import { ensureMtlsDispatcher, loadP12Pem } from "./cert.js";
-import { getMtlsAgent } from "./cert.js";
+import { ensureMtlsDispatcher, getMtlsAgent, loadP12Pem } from "./cert.js";
 import { fetch as ufetch } from "undici";
-
 
 ensureMtlsDispatcher();
 
@@ -22,16 +20,15 @@ type XEl = { localName: string; textContent: string | null };
 
 /* ==================== Utilidades ==================== */
 const SII_ENV = (process.env.SII_ENV || "cert").toLowerCase();
-
 const BASE = SII_ENV === "prod" ? "https://maullin.sii.cl" : "https://palena.sii.cl";
 console.log("SII_ENV", SII_ENV, "BASE", BASE);
+
 const soapEnv = (inner: string) =>
   `<?xml version="1.0" encoding="ISO-8859-1"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body>${inner}</soapenv:Body></soapenv:Envelope>`;
 
 function stripXmlDecl(s: string) { return s.replace(/^\s*<\?xml[^?]*\?>\s*/i, ""); }
 function unescapeXml(s: string) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"); }
 function getTipoFromDte(xml: string){const m=xml.match(/<TipoDTE>(\d+)<\/TipoDTE>/i); if(!m)throw new Error("TipoDTE no encontrado"); return Number(m[1]);}
-
 function assertHasId(xml: string, id: string) {
   if (!new RegExp(`\\b(Id|ID)="${id}"`).test(xml)) throw new Error(`Nodo a firmar sin Id="${id}"`);
 }
@@ -39,9 +36,9 @@ function assertHasId(xml: string, id: string) {
 /* ==================== HTTP SOAP (mTLS) ==================== */
 function hasClientCert() { return !!process.env.SII_CERT_P12_B64 || !!process.env.SII_CERT_P12_PATH; }
 
-async function postSOAP(p: string, body: string, extra?: Record<string,string>) {
+async function postSOAP(p:string, body:string, extra?:Record<string,string>){
   const url = `${BASE}${p}`;
-  const res = await ufetch(url, {                 // <-- undici.fetch
+  const res = await ufetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "text/xml; charset=ISO-8859-1",
@@ -50,7 +47,7 @@ async function postSOAP(p: string, body: string, extra?: Record<string,string>) 
       ...(extra ?? {}),
     },
     body: Buffer.from(body, "latin1"),
-    dispatcher: getMtlsAgent(),                   // <-- mTLS por request
+    dispatcher: getMtlsAgent(),   // mTLS por request
     redirect: "manual",
   });
   const txt = await res.text();
@@ -123,23 +120,22 @@ export function buildDTE({
   }
   if (exento > 0) root.ele("MntExe").txt(String(exento)).up();
   root.ele("MntTotal").txt(String(total)).up().up(); // </Totales>
-  // tras cerrar <Totales>
-const documento = root.up().up(); // Totales -> Encabezado -> Documento
 
-items.forEach((it, idx) => {
-  const det = documento.ele("Detalle");
-  det.ele("NroLinDet").txt(String(idx + 1)).up();
-  det.ele("NmbItem").txt(it.nombre).up();
-  det.ele("QtyItem").txt(String(it.qty)).up();
-  if (tipo === 41 || it.exento) det.ele("IndExe").txt("1").up(); // ver punto 2
-  det.ele("PrcItem").txt(String(it.precioNeto)).up();
-  det.up();
-});
+  // Detalles directamente bajo <Documento>
+  const documento = root.up().up(); // Totales -> Encabezado -> Documento
+  items.forEach((it, idx) => {
+    const det = documento.ele("Detalle");
+    det.ele("NroLinDet").txt(String(idx + 1)).up();
+    det.ele("NmbItem").txt(it.nombre).up();
+    det.ele("QtyItem").txt(String(it.qty)).up();
+    if (tipo === 41 || it.exento) det.ele("IndExe").txt("1").up();
+    det.ele("PrcItem").txt(String(it.precioNeto)).up();
+    det.up();
+  });
 
-const xml = documento.doc().end({ prettyPrint: true });
-return { xml, neto: netoAfecto, iva, total };
+  const xml = documento.doc().end({ prettyPrint: true });
+  return { xml, neto: netoAfecto, iva, total };
 }
-  
 
 /* ==================== TED y firma Documento ==================== */
 type DteHead = { RE: string; TD: number; F: number; FE: string; RR: string; RSR: string; MNT: number; IT1: string; };
@@ -165,6 +161,7 @@ function signDDwithRSASK(ddXml: string, rsaskPem: string): string {
   signer.update(Buffer.from(ddXml, "latin1"));
   return signer.sign(rsaskPem).toString("base64");
 }
+
 function injectTEDandTmst(dteXml: string, tedXml: string, ts: string) {
   return dteXml.replace(/<\/Documento>\s*$/i, `\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`);
 }
@@ -197,7 +194,6 @@ function signXmlEnveloped(xml: string, idToSign: string): string {
   const certB64 = certPem.replace(/-----(BEGIN|END) CERTIFICATE-----|\s/g, "");
   assertHasId(xml, idToSign);
 
-  // <- castea options a any para permitir privateKey y signatureNamespacePrefix
   const sig = new SignedXml({
     idAttribute: "Id",
     privateKey: keyPem,
@@ -206,7 +202,6 @@ function signXmlEnveloped(xml: string, idToSign: string): string {
     signatureNamespacePrefix: "ds",
   } as any);
 
-  // <- setea keyInfoProvider con cast a any
   (sig as any).keyInfoProvider = {
     getKeyInfo: () =>
       `<ds:X509Data xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
@@ -270,9 +265,9 @@ async function getTokenFromSeed(signedXml: string): Promise<string> {
   const ret = nodes.find(n => n.localName === "getTokenReturn");
   if (!ret?.textContent) throw new Error(`No <getTokenReturn>. Head: ${resp.slice(0,200)}`);
   const decoded = unescapeXml(ret.textContent);
-console.log("GETTOKEN_RAW", decoded.slice(0, 600));
-const m = decoded.match(/<TOKEN>([^<]+)<\/TOKEN>/i);
-console.log("MATCH_LEN", m?.[1]?.length);
+  console.log("GETTOKEN_RAW", decoded.slice(0, 600));
+  const m = decoded.match(/<TOKEN>([^<]+)<\/TOKEN>/i);
+  console.log("MATCH_LEN", m?.[1]?.length);
   if (!m) throw new Error(`No <TOKEN>. Head: ${decoded.slice(0,200)}`);
   return m[1].trim();
 }
