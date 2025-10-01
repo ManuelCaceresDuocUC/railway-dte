@@ -167,7 +167,10 @@ function signDDwithRSASK(ddXml: string, rsaskPem: string): string {
 }
 
 function injectTEDandTmst(dteXml: string, tedXml: string, ts: string) {
-  return dteXml.replace(/<\/Documento>\s*$/i, `\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>`);
+  return dteXml.replace(
+    /<\/Documento>\s*<\/DTE>/i,
+    `\n${tedXml}\n<TmstFirma>${ts}</TmstFirma>\n</Documento>\n</DTE>`
+  );
 }
 
 function addRefById(sig: SignedXml, id: string) {
