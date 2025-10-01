@@ -229,6 +229,7 @@ function signDocumento(dteXml: string): string {
 }
 
 export function stampDTEWithCAF(dteXml: string, caf: Caf): string {
+
   const TD = Number(dteXml.match(/<TipoDTE>(\d+)<\/TipoDTE>/)![1]);
   const F  = Number(dteXml.match(/<Folio>(\d+)<\/Folio>/)![1]);
   const FE = dteXml.match(/<FchEmis>([^<]+)<\/FchEmis>/)![1];
@@ -241,7 +242,7 @@ export function stampDTEWithCAF(dteXml: string, caf: Caf): string {
   const ts = new Date().toISOString().replace("T"," ").slice(0,19);
   const ddXml = buildDDXML(caf.xml, { RE, TD, F, FE, RR, RSR, MNT, IT1 }, ts);
   const frmtB64 = signDDwithRSASK(ddXml, caf.rsask);
-  const tedXml = `<TED version="1.0"><DD>${ddXml}</DD><FRMT algoritmo="SHA1withRSA">${frmtB64}</FRMT></TED>`;
+  const tedXml = `<TED version="1.0">${ddXml}<FRMT algoritmo="SHA1withRSA">${frmtB64}</FRMT></TED>`;
   return signDocumento(injectTEDandTmst(dteXml, tedXml, ts));
 }
 
