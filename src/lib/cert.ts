@@ -4,7 +4,6 @@ import path from "node:path";
 import forge from "node-forge";
 import { Agent, setGlobalDispatcher } from "undici";
 
-/** ------- P12 helpers (para firma XML) ------- */
 function loadP12Buffer(): Buffer {
   const b64 = process.env.SII_CERT_P12_B64?.trim();
   if (b64) return Buffer.from(b64, "base64");
@@ -13,30 +12,20 @@ function loadP12Buffer(): Buffer {
   return fs.readFileSync(path.resolve(p));
 }
 
-export function loadP12Pem(): { keyPem: string; certPem: string } {
+export function loadP12Pem() {
   const pfx = loadP12Buffer();
   const pass = process.env.SII_CERT_PASSWORD ?? "";
   const der = forge.util.createBuffer(pfx.toString("binary"));
   const asn1 = forge.asn1.fromDer(der);
   const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, pass);
-
-  const certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] ?? [];
-  const keyBags8 = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];
-  const keyBags1 = p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] ?? [];
-
-  const certObj = certBags[0]?.cert;
-  if (!certObj) throw new Error("No se encontró certificado en el P12");
-  const keyObj = (keyBags8[0]?.key ?? keyBags1[0]?.key);
-  if (!keyObj) throw new Error("No se encontró clave privada en el P12");
-
-  const certPem = forge.pki.certificateToPem(certObj);
-  const keyPem = forge.pki.privateKeyToPem(keyObj);
-  return { keyPem, certPem };
+  const cert = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag]?.[0]?.cert;
+  const key  = (p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key) ||
+               (p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag]?.[0]?.key);
+  if (!cert || !key) throw new Error("P12 sin cert o sin private key");
+  return { keyPem: forge.pki.privateKeyToPem(key), certPem: forge.pki.certificateToPem(cert) };
 }
 
-/** ------- Agent mTLS (para HTTP SOAP) ------- */
 let _agent: Agent | null = null;
-
 export function getMtlsAgent(): Agent {
   if (_agent) return _agent;
   _agent = new Agent({
@@ -45,6 +34,8 @@ export function getMtlsAgent(): Agent {
         pfx: loadP12Buffer(),
         passphrase: process.env.SII_CERT_PASSWORD ?? "",
         servername: (process.env.SII_ENV?.toLowerCase() === "prod" ? "maullin.sii.cl" : "palena.sii.cl"),
+        minVersion: "TLSv1.2",
+        ALPNProtocols: ["http/1.1"],
       },
     },
   } as any);
@@ -52,7 +43,7 @@ export function getMtlsAgent(): Agent {
 }
 
 let mtlsSet = false;
-export function ensureMtlsDispatcher(): void {
+export function ensureMtlsDispatcher() {
   if (mtlsSet) return;
   setGlobalDispatcher(getMtlsAgent());
   mtlsSet = true;

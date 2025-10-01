@@ -41,18 +41,22 @@ async function postSOAP(p:string, body:string, extra?:Record<string,string>){
   const res = await ufetch(url, {
     method: "POST",
     headers: {
+      "Host": BASE.replace(/^https?:\/\//, ""),   // palena.sii.cl / maullin.sii.cl
       "Content-Type": "text/xml; charset=ISO-8859-1",
-      Accept: "text/xml,application/xml,text/plain",
-      SOAPAction: "",
+      "Accept": "text/xml,application/xml,text/plain",
+      "SOAPAction": "",
       ...(extra ?? {}),
     },
     body: Buffer.from(body, "latin1"),
-    dispatcher: getMtlsAgent(),   // mTLS por request
+    dispatcher: getMtlsAgent(),
     redirect: "manual",
   });
   const txt = await res.text();
   console.log("[SII SOAP]", p, "status", res.status, "ctype:", res.headers.get("content-type"));
-  if (/^\s*<html/i.test(txt)) throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente o endpoint errado.");
+  if (/^\s*<html/i.test(txt)) {
+    console.error("HTML_HEAD", txt.slice(0,200));
+    throw new Error("HTML del SII: Transacción Rechazada. Probable mTLS ausente o endpoint errado.");
+  }
   if (!res.ok) throw new Error(`SOAP ${p} ${res.status}: ${txt.slice(0,400)}`);
   return txt;
 }
@@ -326,4 +330,11 @@ export async function sendEnvioDTE(xmlDte:string, token:string){
   const txt=await postSOAP(path, env, {Cookie:`TOKEN=${token}`});
   const trackid=extractTrackIdFromUpload(txt);
   return {trackid};
+}
+
+export function buildSoapUploadFromDte(dteXml: string) {
+  const firmado = signSobre(buildSobreEnvio(dteXml));
+  return soapEnv(
+    `<upload><fileName>SetDTE.xml</fileName><contentFile><![CDATA[${firmado}]]></contentFile></upload>`
+  );
 }

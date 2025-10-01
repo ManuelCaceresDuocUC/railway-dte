@@ -1,7 +1,14 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { getToken, buildDTE, loadCAF, stampDTEWithCAF, sendEnvioDTE } from "./lib/dte.js";
+import { getToken, buildDTE, loadCAF, stampDTEWithCAF, sendEnvioDTE,buildSoapUploadFromDte } from "./lib/dte.js";
 
+const EMISOR = {
+  rut:  process.env.BILLING_RUT ?? "",
+  rz:   process.env.BILLING_BUSINESS_NAME ?? "",
+  giro: process.env.BILLING_GIRO ?? "",
+  dir:  process.env.BILLING_ADDRESS ?? "",
+  cmna: process.env.BILLING_COMMUNE ?? "",
+};
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cors({
@@ -18,34 +25,25 @@ app.get("/token", async (_req, res) => {
   res.json({ ok: true, token, len: token.length });
 });
 
-app.post("/send", async (req: Request, res: Response) => {
+app.post("/send", async (req, res) => {
   try {
-    const { tipo = 39, folio = 1, receptor, items, fecha } = req.body as any;
-    if (!Array.isArray(items) || items.length === 0) throw new Error("items requerido");
-
-    const { xml } = buildDTE({
-      tipo,
-      folio,
-      emisor: {
-        rut: process.env.BILLING_RUT || "",
-        rz: process.env.BILLING_BUSINESS_NAME || "",
-        giro: process.env.BILLING_GIRO || "",
-        dir: process.env.BILLING_ADDRESS || "",
-        cmna: process.env.BILLING_COMMUNE || "Valparaíso",
-      },
-      receptor: receptor ?? { rut: "66666666-6", rz: "Cliente" },
-      fecha: fecha ?? new Date().toISOString().slice(0, 10),
-      items,
-    });
+    const { tipo, folio, fecha, receptor, items } = req.body;
+    const dryRun = req.query.dryRun === "1";
 
     const caf = loadCAF(tipo);
-    const dteFirmado = stampDTEWithCAF(xml, caf);
+    const { xml } = buildDTE({ tipo, folio, emisor: EMISOR, receptor, items, fecha });
+    const dteTimbrado = stampDTEWithCAF(xml, caf);
+
+    if (dryRun) {
+      const env = buildSoapUploadFromDte(dteTimbrado);
+      return res.type("text/xml; charset=ISO-8859-1").send(env);
+    }
+
     const token = await getToken();
-    const { trackid } = await sendEnvioDTE(dteFirmado, token);
+    const { trackid } = await sendEnvioDTE(dteTimbrado, token);
     res.json({ ok: true, trackid });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).json({ ok: false, error: msg });
+  } catch (e:any) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
 
