@@ -1,7 +1,9 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { getToken, buildDTE, loadCAF, stampDTEWithCAF, sendEnvioDTE,buildSoapUploadFromDte } from "./lib/dte.js";
-
+import {
+  loadCAF, buildDTE, stampDTEWithCAF,
+  sendEnvioDTE, getToken, buildSoapUploadFromDte
+} from "./lib/dte.js";
 const EMISOR = {
   rut:  process.env.BILLING_RUT ?? "",
   rz:   process.env.BILLING_BUSINESS_NAME ?? "",
@@ -28,24 +30,31 @@ app.get("/token", async (_req, res) => {
 app.post("/send", async (req, res) => {
   try {
     const { tipo, folio, fecha, receptor, items } = req.body;
-    const dryRun = req.query.dryRun === "1";
 
     const caf = loadCAF(tipo);
     const { xml } = buildDTE({ tipo, folio, emisor: EMISOR, receptor, items, fecha });
-    const dteTimbrado = stampDTEWithCAF(xml, caf);
+    const dteTimbrado = stampDTEWithCAF(xml, caf); // aquí se inserta TED + TmstFirma
 
-    if (dryRun) {
+    // guardia: debe venir timbrado
+    if (!/<\/TED>/.test(dteTimbrado) || !/<\/TmstFirma>/.test(dteTimbrado)) {
+      return res.status(400).json({ ok: false, error: "DTE sin TED/TmstFirma" });
+    }
+
+    // dry run
+    if (req.query.dryRun === "1") {
       const env = buildSoapUploadFromDte(dteTimbrado);
       return res.type("text/xml; charset=ISO-8859-1").send(env);
     }
 
+    // envío real
     const token = await getToken();
     const { trackid } = await sendEnvioDTE(dteTimbrado, token);
     res.json({ ok: true, trackid });
-  } catch (e:any) {
+  } catch (e: any) {
     res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
+
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
